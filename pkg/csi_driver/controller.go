@@ -19,6 +19,7 @@ package driver
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/golang/glog"
@@ -62,10 +63,37 @@ type controllerServerConfig struct {
 	driver      *GCFSDriver
 	fileService file.Service
 	metaService metadata.Service
+	ipAllocator *util.IPAllocator
 }
 
-func newControllerServer(config *controllerServerConfig) csi.ControllerServer {
-	return &controllerServer{config: config}
+func newControllerServer(config *controllerServerConfig) (csi.ControllerServer, error) {
+	ipAllocator, err := config.newIPAllocator()
+	if err != nil {
+		return nil, err
+	}
+	config.ipAllocator = ipAllocator
+	return &controllerServer{config: config}, nil
+}
+
+func (config *controllerServerConfig) newIPAllocator() (*util.IPAllocator, error) {
+	activeInstances, err := getReservedInstances(config)
+	if err != nil {
+		return nil, err
+	}
+	ipAllocator := util.NewIPAllocator(make(map[string][]string), make(map[string]bool))
+	for _, activeInstance := range activeInstances {
+		ipAllocator.ReserveIPs(activeInstance.Network.ReservedIpRange)
+	}
+	return ipAllocator, nil
+}
+
+func getReservedInstances(config *controllerServerConfig) ([]* file.ServiceInstance, error){
+	ctx, _ := context.WithTimeout(context.Background(), 1*time.Minute)
+	reservedInstances, err := config.fileService.ListInstances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return reservedInstances, nil
 }
 
 // CreateVolume creates a GCFS instance
@@ -86,6 +114,7 @@ func (s *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolu
 	glog.V(5).Infof("Using capacity bytes %q for volume %q", capBytes, name)
 
 	newFiler, err := s.generateNewFileInstance(name, capBytes, req.GetParameters())
+	
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -95,6 +124,7 @@ func (s *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolu
 	if err != nil && !file.IsNotFoundErr(err) {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+	
 	if filer != nil {
 		// Instance already exists, check if it meets the request
 		if err = file.CompareInstances(newFiler, filer); err != nil {
@@ -131,6 +161,17 @@ func (s *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVolu
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
+
+	activeInstances, err := getReservedInstances(s.config)
+	if err != nil {
+		return nil, err
+	}
+
+	reservedUpdated := make(map[string]bool)
+	for _, instance :=  range activeInstances {
+		reservedUpdated[instance.Network.Ip] = true
+	}
+	err = s.config.ipAllocator.FreeIPBlocks(reservedUpdated)
 	return &csi.DeleteVolumeResponse{}, nil
 }
 

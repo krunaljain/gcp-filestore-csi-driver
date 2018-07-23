@@ -56,6 +56,7 @@ type Service interface {
 	CreateInstance(ctx context.Context, obj *ServiceInstance) (*ServiceInstance, error)
 	DeleteInstance(ctx context.Context, obj *ServiceInstance) error
 	GetInstance(ctx context.Context, obj *ServiceInstance) (*ServiceInstance, error)
+	ListInstances(ctx context.Context) ([]*ServiceInstance, error)
 }
 
 type gcfsServiceManager struct {
@@ -229,6 +230,22 @@ func (manager *gcfsServiceManager) DeleteInstance(ctx context.Context, obj *Serv
 
 	glog.Infof("Instance %v has been deleted", obj.Name)
 	return nil
+}
+
+func (manager *gcfsServiceManager) ListInstances(ctx context.Context) ([]*ServiceInstance, error) {
+	instances, err := manager.instancesService.List("-").Context(ctx).Do()
+	if err != nil {
+		return nil, err
+	}
+	var activeInstances []*ServiceInstance
+	for _, activeInstance := range instances.Instances {
+		serviceInstance, err := cloudInstanceToServiceInstance(activeInstance) 
+		if err != nil {
+			return nil, err
+		}
+		activeInstances = append(activeInstances, serviceInstance)
+	}
+	return activeInstances, nil
 }
 
 func (manager *gcfsServiceManager) waitForOp(ctx context.Context, op *beta.Operation) error {

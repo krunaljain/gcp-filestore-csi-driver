@@ -91,11 +91,15 @@ func NewGCFSDriver(config *GCFSDriverConfig) (*GCFSDriver, error) {
 		driver.addControllerServiceCapabilities(csc)
 
 		// Configure controller server
-		driver.cs = newControllerServer(&controllerServerConfig{
+		controllerServer, err := newControllerServer(&controllerServerConfig{
 			driver:      driver,
 			fileService: config.Cloud.File,
 			metaService: config.Cloud.Meta,
 		})
+		if err != nil {
+			return nil, err
+		}
+		driver.cs = controllerServer
 	}
 
 	return driver, nil

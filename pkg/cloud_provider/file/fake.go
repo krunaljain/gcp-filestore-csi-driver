@@ -72,3 +72,7 @@ func (manager *fakeServiceManager) GetInstance(ctx context.Context, obj *Service
 		},
 	}
 }
+
+func (manager *fakeServiceManager) ListInstances (ctx context.Context) ([]*ServiceInstance, error) {
+	return nil, nil
+}
